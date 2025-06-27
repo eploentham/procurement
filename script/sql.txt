@@ -1,0 +1,477 @@
+-- ===================================
+-- IMPORTANT NOTES สำหรับ MyISAM
+-- ===================================
+/*
+หมายเหตุสำคัญสำหรับ MyISAM Engine:
+
+1. ไม่รองรับ Foreign Key Constraints
+   - ต้องจัดการ referential integrity ใน application level
+   - ใช้ INDEX แทนการอ้างอิง foreign key
+
+2. ไม่รองรับ Transactions
+   - ไม่สามารถใช้ BEGIN, COMMIT, ROLLBACK
+   - ต้องจัดการ data consistency ใน application
+
+3. ข้อดีของ MyISAM:
+   - ประสิทธิภาพในการ SELECT สูง
+   - ใช้พื้นที่เก็บข้อมูลน้อยกว่า
+   - รองรับ Full-Text Search
+
+4. การจัดการ Data Integrity:
+   - ตรวจสอบ referential integrity ใน Node.js application
+   - ใช้ validation ที่เข้มงวดใน API layer
+   - สร้าง trigger หรือ stored procedure เพื่อจัดการข้อมูล
+
+5. แนะนำให้ใช้ INDEX อย่างเหมาะสม:
+   - เพิ่ม INDEX ให้กับ foreign key fields
+   - ใช้ COMPOSITE INDEX สำหรับ query ที่ซับซ้อน
+*/
+
+-- ตัวอย่างการตรวจสอบ referential integrity ใน SQL
+/*
+-- ตรวจสอบ orphaned records
+SELECT * FROM users WHERE department_id NOT IN (SELECT id FROM departments WHERE id IS NOT NULL);
+
+-- ตรวจสอบข้อมูลที่เกี่ยวข้องก่อนลบ
+SELECT COUNT(*) FROM purchase_requests WHERE requester_id = 1;
+*/-- ===================================
+-- PROCUREMENT MANAGEMENT SYSTEM DATABASE
+-- รองรับภาษาไทย (UTF8MB4)
+-- ===================================
+
+-- Create database
+CREATE DATABASE IF NOT EXISTS procurement_system 
+DEFAULT CHARACTER SET utf8mb4 
+COLLATE utf8mb4_unicode_ci;
+
+USE procurement_system;
+
+-- ===================================
+-- 1. ตารางผู้ใช้งาน (Users)
+-- ===================================
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_code VARCHAR(20) NOT NULL UNIQUE COMMENT 'รหัสผู้ใช้',
+    username VARCHAR(50) NOT NULL UNIQUE COMMENT 'ชื่อผู้ใช้งาน',
+    email VARCHAR(100) NOT NULL UNIQUE COMMENT 'อีเมล',
+    password_hash VARCHAR(255) NOT NULL COMMENT 'รหัสผ่านที่เข้ารหัส',
+    
+    -- ข้อมูลส่วนตัว
+    title_th VARCHAR(20) COMMENT 'คำนำหน้าชื่อ (ไทย)',
+    first_name_th VARCHAR(100) NOT NULL COMMENT 'ชื่อ (ไทย)',
+    last_name_th VARCHAR(100) NOT NULL COMMENT 'นามสกุล (ไทย)',
+    title_en VARCHAR(20) COMMENT 'คำนำหน้าชื่อ (อังกฤษ)',
+    first_name_en VARCHAR(100) COMMENT 'ชื่อ (อังกฤษ)',
+    last_name_en VARCHAR(100) COMMENT 'นามสกุล (อังกฤษ)',
+    
+    -- ข้อมูลการติดต่อ
+    phone VARCHAR(20) COMMENT 'เบอร์โทร',
+    mobile VARCHAR(20) COMMENT 'เบอร์มือถือ',
+    line_id VARCHAR(50) COMMENT 'Line ID',
+    
+    -- ข้อมูลองค์กร
+    employee_id VARCHAR(20) COMMENT 'รหัสพนักงาน',
+    department_id INT COMMENT 'แผนก',
+    position_th VARCHAR(100) COMMENT 'ตำแหน่ง (ไทย)',
+    position_en VARCHAR(100) COMMENT 'ตำแหน่ง (อังกฤษ)',
+    
+    -- สิทธิ์และสถานะ
+    role ENUM('admin', 'manager', 'buyer', 'requester', 'approver', 'finance', 'receiver') DEFAULT 'requester' COMMENT 'บทบาท',
+    approval_level INT DEFAULT 0 COMMENT 'ระดับการอนุมัติ',
+    budget_limit DECIMAL(15,2) DEFAULT 0.00 COMMENT 'วงเงินอนุมัติ',
+    
+    -- สถานะ
+    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active' COMMENT 'สถานะ',
+    email_verified BOOLEAN DEFAULT FALSE COMMENT 'ยืนยันอีเมลแล้ว',
+    last_login TIMESTAMP NULL COMMENT 'เข้าใช้งานล่าสุด',
+    
+    -- วันที่
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_username (username),
+    INDEX idx_email (email),
+    INDEX idx_employee_id (employee_id),
+    INDEX idx_department (department_id),
+    INDEX idx_role (role)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางผู้ใช้งาน';
+
+-- ===================================
+-- 2. ตารางแผนก (Departments)
+-- ===================================
+CREATE TABLE departments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    dept_code VARCHAR(10) NOT NULL UNIQUE COMMENT 'รหัสแผนก',
+    dept_name_th VARCHAR(100) NOT NULL COMMENT 'ชื่อแผนก (ไทย)',
+    dept_name_en VARCHAR(100) COMMENT 'ชื่อแผนก (อังกฤษ)',
+    description TEXT COMMENT 'คำอธิบาย',
+    parent_id INT COMMENT 'แผนกแม่',
+    manager_id INT COMMENT 'หัวหน้าแผนก',
+    cost_center VARCHAR(20) COMMENT 'ศูนย์ต้นทุน',
+    budget_annual DECIMAL(15,2) DEFAULT 0.00 COMMENT 'งบประมาณรายปี',
+    is_active BOOLEAN DEFAULT TRUE COMMENT 'ใช้งาน',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_dept_code (dept_code),
+    INDEX idx_parent_id (parent_id),
+    INDEX idx_manager_id (manager_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางแผนก';
+
+-- ===================================
+-- 3. ตารางผู้ขาย (Vendors)
+-- ===================================
+CREATE TABLE vendors (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_code VARCHAR(20) NOT NULL UNIQUE COMMENT 'รหัสผู้ขาย',
+    vendor_name_th VARCHAR(255) NOT NULL COMMENT 'ชื่อผู้ขาย (ไทย)',
+    vendor_name_en VARCHAR(255) COMMENT 'ชื่อผู้ขาย (อังกฤษ)',
+    company_name_th VARCHAR(255) NOT NULL COMMENT 'ชื่อบริษัท (ไทย)',
+    company_name_en VARCHAR(255) COMMENT 'ชื่อบริษัท (อังกฤษ)',
+    tax_id VARCHAR(13) UNIQUE COMMENT 'เลขประจำตัวผู้เสียภาษี',
+    business_type ENUM('บุคคลธรรมดา', 'ห้างหุ้นส่วนสามัญ', 'ห้างหุ้นส่วนจำกัด', 'บริษัทจำกัด', 'บริษัทมหาชนจำกัด', 'หน่วยงานราชการ', 'อื่นๆ') DEFAULT 'บุคคลธรรมดา' COMMENT 'ประเภทธุรกิจ',
+    
+    -- ที่อยู่
+    address_th TEXT COMMENT 'ที่อยู่ (ไทย)',
+    address_en TEXT COMMENT 'ที่อยู่ (อังกฤษ)',
+    district VARCHAR(100) COMMENT 'ตำบล/แขวง',
+    amphoe VARCHAR(100) COMMENT 'อำเภอ/เขต',
+    province VARCHAR(100) COMMENT 'จังหวัด',
+    postal_code VARCHAR(10) COMMENT 'รหัสไปรษณีย์',
+    country VARCHAR(50) DEFAULT 'ประเทศไทย' COMMENT 'ประเทศ',
+    
+    -- การติดต่อ
+    phone VARCHAR(20) COMMENT 'เบอร์โทร',
+    fax VARCHAR(20) COMMENT 'เบอร์แฟกซ์',
+    email VARCHAR(100) COMMENT 'อีเมล',
+    website VARCHAR(255) COMMENT 'เว็บไซต์',
+    
+    -- เงื่อนไขการค้า
+    payment_terms INT DEFAULT 30 COMMENT 'เงื่อนไขการชำระเงิน (วัน)',
+    credit_limit DECIMAL(15,2) DEFAULT 0.00 COMMENT 'วงเงินเครดิต',
+    discount_percent DECIMAL(5,2) DEFAULT 0.00 COMMENT 'ส่วนลดพิเศษ (%)',
+    
+    -- สถานะ
+    status ENUM('active', 'inactive', 'suspended', 'blacklist') DEFAULT 'active' COMMENT 'สถานะ',
+    approval_status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending' COMMENT 'สถานะการอนุมัติ',
+    
+    -- วันที่สำคัญ
+    registration_date DATE COMMENT 'วันที่ลงทะเบียน',
+    contract_start_date DATE COMMENT 'วันที่เริ่มสัญญา',
+    contract_end_date DATE COMMENT 'วันที่สิ้นสุดสัญญา',
+    
+    -- ผู้จัดการข้อมูล
+    created_by INT COMMENT 'ผู้สร้างข้อมูล',
+    updated_by INT COMMENT 'ผู้แก้ไขล่าสุด',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    remarks TEXT COMMENT 'หมายเหตุ',
+    
+    INDEX idx_vendor_code (vendor_code),
+    INDEX idx_vendor_name_th (vendor_name_th(100)),
+    INDEX idx_tax_id (tax_id),
+    INDEX idx_status (status),
+    INDEX idx_created_by (created_by),
+    INDEX idx_updated_by (updated_by)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางผู้ขาย';
+
+-- ===================================
+-- 4. ตารางหมวดหมู่สินค้า (Product Categories)
+-- ===================================
+CREATE TABLE product_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_code VARCHAR(20) NOT NULL UNIQUE COMMENT 'รหัสหมวดหมู่',
+    category_name_th VARCHAR(100) NOT NULL COMMENT 'ชื่อหมวดหมู่ (ไทย)',
+    category_name_en VARCHAR(100) COMMENT 'ชื่อหมวดหมู่ (อังกฤษ)',
+    description_th TEXT COMMENT 'คำอธิบาย (ไทย)',
+    description_en TEXT COMMENT 'คำอธิบาย (อังกฤษ)',
+    parent_id INT COMMENT 'หมวดหมู่แม่',
+    approval_required BOOLEAN DEFAULT FALSE COMMENT 'ต้องขออนุมัติ',
+    is_active BOOLEAN DEFAULT TRUE COMMENT 'ใช้งาน',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_category_code (category_code),
+    INDEX idx_parent_id (parent_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางหมวดหมู่สินค้า';
+
+-- ===================================
+-- 5. ตารางสินค้า/บริการ (Products/Services)
+-- ===================================
+CREATE TABLE products (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_code VARCHAR(30) NOT NULL UNIQUE COMMENT 'รหัสสินค้า',
+    product_name_th VARCHAR(255) NOT NULL COMMENT 'ชื่อสินค้า (ไทย)',
+    product_name_en VARCHAR(255) COMMENT 'ชื่อสินค้า (อังกฤษ)',
+    description_th TEXT COMMENT 'รายละเอียด (ไทย)',
+    description_en TEXT COMMENT 'รายละเอียด (อังกฤษ)',
+    
+    category_id INT NOT NULL COMMENT 'หมวดหมู่',
+    product_type ENUM('สินค้า', 'บริการ', 'วัสดุ', 'อะไหล่', 'เครื่องมือ', 'สำนักงาน') DEFAULT 'สินค้า' COMMENT 'ประเภทสินค้า',
+    
+    -- หน่วยนับ
+    unit_th VARCHAR(20) NOT NULL COMMENT 'หน่วยนับ (ไทย)',
+    unit_en VARCHAR(20) COMMENT 'หน่วยนับ (อังกฤษ)',
+    
+    -- ราคา
+    standard_price DECIMAL(15,2) DEFAULT 0.00 COMMENT 'ราคามาตรฐาน',
+    last_price DECIMAL(15,2) DEFAULT 0.00 COMMENT 'ราคาล่าสุด',
+    currency VARCHAR(3) DEFAULT 'THB' COMMENT 'สกุลเงิน',
+    
+    -- คุณสมบัติ
+    brand VARCHAR(100) COMMENT 'ยี่ห้อ',
+    model VARCHAR(100) COMMENT 'รุ่น',
+    specifications TEXT COMMENT 'คุณสมบัติเทคนิค',
+    warranty_period INT DEFAULT 0 COMMENT 'ระยะเวลารับประกัน (เดือน)',
+    
+    -- การจัดการสต็อก
+    is_stockable BOOLEAN DEFAULT TRUE COMMENT 'เก็บสต็อก',
+    min_order_qty DECIMAL(10,2) DEFAULT 1.00 COMMENT 'จำนวนสั่งซื้อขั้นต่ำ',
+    reorder_level DECIMAL(10,2) DEFAULT 0.00 COMMENT 'จุดสั่งซื้อใหม่',
+    
+    -- สถานะ
+    status ENUM('active', 'inactive', 'discontinued') DEFAULT 'active' COMMENT 'สถานะ',
+    is_approved BOOLEAN DEFAULT FALSE COMMENT 'อนุมัติแล้ว',
+    approved_by INT COMMENT 'ผู้อนุมัติ',
+    approved_at TIMESTAMP NULL COMMENT 'วันที่อนุมัติ',
+    
+    -- ผู้จัดการข้อมูล
+    created_by INT COMMENT 'ผู้สร้างข้อมูล',
+    updated_by INT COMMENT 'ผู้แก้ไขล่าสุด',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_product_code (product_code),
+    INDEX idx_product_name_th (product_name_th(100)),
+    INDEX idx_category (category_id),
+    INDEX idx_status (status),
+    INDEX idx_approved_by (approved_by),
+    INDEX idx_created_by (created_by),
+    INDEX idx_updated_by (updated_by)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางสินค้า/บริการ';
+
+-- ===================================
+-- 6. ตารางใบขอซื้อ/ขอจ้าง (Purchase Requests)
+-- ===================================
+CREATE TABLE purchase_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pr_number VARCHAR(20) NOT NULL UNIQUE COMMENT 'เลขที่ใบขอซื้อ',
+    pr_type ENUM('ซื้อ', 'จ้าง', 'เช่า', 'บริการ') DEFAULT 'ซื้อ' COMMENT 'ประเภทการขอ',
+    
+    -- ข้อมูลผู้ขอ
+    requester_id INT NOT NULL COMMENT 'ผู้ขอ',
+    department_id INT NOT NULL COMMENT 'แผนกผู้ขอ',
+    request_date DATE NOT NULL COMMENT 'วันที่ขอ',
+    required_date DATE COMMENT 'วันที่ต้องการใช้',
+    
+    -- รายละเอียดการขอ
+    subject_th VARCHAR(255) NOT NULL COMMENT 'เรื่อง (ไทย)',
+    subject_en VARCHAR(255) COMMENT 'เรื่อง (อังกฤษ)',
+    purpose_th TEXT NOT NULL COMMENT 'วัตถุประสงค์ (ไทย)',
+    purpose_en TEXT COMMENT 'วัตถุประสงค์ (อังกฤษ)',
+    
+    -- งบประมาณ
+    budget_source VARCHAR(100) COMMENT 'แหล่งงบประมาณ',
+    budget_year YEAR COMMENT 'ปีงบประมาณ',
+    estimated_total DECIMAL(15,2) DEFAULT 0.00 COMMENT 'ประมาณการรวม',
+    
+    -- สถานะการอนุมัติ
+    status ENUM('draft', 'submitted', 'reviewing', 'approved', 'rejected', 'cancelled') DEFAULT 'draft' COMMENT 'สถานะ',
+    approval_level INT DEFAULT 0 COMMENT 'ระดับการอนุมัติปัจจุบัน',
+    current_approver_id INT COMMENT 'ผู้อนุมัติปัจจุบัน',
+    
+    -- วันที่สำคัญ
+    submitted_at TIMESTAMP NULL COMMENT 'วันที่ส่งขออนุมัติ',
+    approved_at TIMESTAMP NULL COMMENT 'วันที่อนุมัติ',
+    rejected_at TIMESTAMP NULL COMMENT 'วันที่ไม่อนุมัติ',
+    
+    -- หมายเหตุ
+    remarks TEXT COMMENT 'หมายเหตุ',
+    rejection_reason TEXT COMMENT 'เหตุผลที่ไม่อนุมัติ',
+    
+    -- ผู้จัดการข้อมูล
+    created_by INT COMMENT 'ผู้สร้าง',
+    updated_by INT COMMENT 'ผู้แก้ไขล่าสุด',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_pr_number (pr_number),
+    INDEX idx_requester (requester_id),
+    INDEX idx_department (department_id),
+    INDEX idx_status (status),
+    INDEX idx_request_date (request_date),
+    INDEX idx_current_approver_id (current_approver_id),
+    INDEX idx_created_by (created_by),
+    INDEX idx_updated_by (updated_by)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางใบขอซื้อ/ขอจ้าง';
+
+-- ===================================
+-- 7. ตารางรายการสินค้าในใบขอซื้อ (Purchase Request Items)
+-- ===================================
+CREATE TABLE purchase_request_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pr_id INT NOT NULL COMMENT 'ใบขอซื้อ',
+    item_no INT NOT NULL COMMENT 'ลำดับรายการ',
+    
+    product_id INT COMMENT 'สินค้า (ถ้ามีในระบบ)',
+    product_description_th TEXT NOT NULL COMMENT 'รายละเอียดสินค้า (ไทย)',
+    product_description_en TEXT COMMENT 'รายละเอียดสินค้า (อังกฤษ)',
+    specifications TEXT COMMENT 'คุณสมบัติเทคนิค',
+    
+    -- จำนวนและหน่วย
+    quantity DECIMAL(10,2) NOT NULL COMMENT 'จำนวน',
+    unit_th VARCHAR(20) NOT NULL COMMENT 'หน่วยนับ (ไทย)',
+    unit_en VARCHAR(20) COMMENT 'หน่วยนับ (อังกฤษ)',
+    
+    -- ราคา
+    estimated_unit_price DECIMAL(15,2) DEFAULT 0.00 COMMENT 'ราคาต่อหน่วยประมาณการ',
+    estimated_total_price DECIMAL(15,2) DEFAULT 0.00 COMMENT 'ราคารวมประมาณการ',
+    
+    -- วันที่ต้องการ
+    required_date DATE COMMENT 'วันที่ต้องการ',
+    
+    -- หมายเหตุ
+    remarks TEXT COMMENT 'หมายเหตุ',
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_pr_id (pr_id),
+    INDEX idx_product_id (product_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางรายการสินค้าในใบขอซื้อ';
+
+-- ===================================
+-- 8. ตารางขั้นตอนการอนุมัติ (Approval Workflows)
+-- ===================================
+CREATE TABLE approval_workflows (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workflow_name VARCHAR(100) NOT NULL COMMENT 'ชื่อขั้นตอนการอนุมัติ',
+    document_type ENUM('purchase_request', 'purchase_order', 'contract', 'payment') NOT NULL COMMENT 'ประเภทเอกสาร',
+    department_id INT COMMENT 'แผนก (ถ้าเฉพาะแผนก)',
+    amount_min DECIMAL(15,2) DEFAULT 0.00 COMMENT 'จำนวนเงินขั้นต่ำ',
+    amount_max DECIMAL(15,2) DEFAULT 999999999.99 COMMENT 'จำนวนเงินสูงสุด',
+    is_active BOOLEAN DEFAULT TRUE COMMENT 'ใช้งาน',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_document_type (document_type),
+    INDEX idx_amount_range (amount_min, amount_max),
+    INDEX idx_department_id (department_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางขั้นตอนการอนุมัติ';
+
+-- ===================================
+-- 9. ตารางขั้นตอนการอนุมัติแต่ละระดับ (Approval Steps)
+-- ===================================
+CREATE TABLE approval_steps (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workflow_id INT NOT NULL COMMENT 'ขั้นตอนการอนุมัติ',
+    step_level INT NOT NULL COMMENT 'ระดับขั้นตอน',
+    step_name VARCHAR(100) NOT NULL COMMENT 'ชื่อขั้นตอน',
+    approver_type ENUM('user', 'role', 'department_head') NOT NULL COMMENT 'ประเภทผู้อนุมัติ',
+    approver_id INT COMMENT 'ผู้อนุมัติ (ถ้าเป็น user)',
+    approver_role ENUM('admin', 'manager', 'buyer', 'requester', 'approver', 'finance', 'receiver') COMMENT 'บทบาทผู้อนุมัติ',
+    is_required BOOLEAN DEFAULT TRUE COMMENT 'จำเป็นต้องอนุมัติ',
+    can_skip BOOLEAN DEFAULT FALSE COMMENT 'สามารถข้ามได้',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_workflow_id (workflow_id),
+    INDEX idx_step_level (step_level),
+    INDEX idx_approver_id (approver_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางขั้นตอนการอนุมัติแต่ละระดับ';
+
+-- ===================================
+-- 10. ตารางประวัติการอนุมัติ (Approval History)
+-- ===================================
+CREATE TABLE approval_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    document_type ENUM('purchase_request', 'purchase_order', 'contract', 'payment') NOT NULL COMMENT 'ประเภทเอกสาร',
+    document_id INT NOT NULL COMMENT 'รหัสเอกสาร',
+    step_level INT NOT NULL COMMENT 'ระดับขั้นตอน',
+    approver_id INT NOT NULL COMMENT 'ผู้อนุมัติ',
+    action ENUM('approved', 'rejected', 'returned', 'delegated') NOT NULL COMMENT 'การกระทำ',
+    comments TEXT COMMENT 'ความคิดเห็น',
+    approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'วันเวลาที่อนุมัติ',
+    
+    INDEX idx_document (document_type, document_id),
+    INDEX idx_approver_id (approver_id),
+    INDEX idx_approved_at (approved_at)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ตารางประวัติการอนุมัติ';
+
+-- ===================================
+-- INSERT ข้อมูลตัวอย่าง (Sample Data)
+-- ===================================
+
+-- เพิ่มแผนกตัวอย่าง
+INSERT INTO departments (dept_code, dept_name_th, dept_name_en, description) VALUES
+('IT', 'แผนกเทคโนโลยีสารสนเทศ', 'Information Technology', 'จัดการระบบคอมพิวเตอร์และเทคโนโลยี'),
+('HR', 'แผนกทรัพยากรมนุษย์', 'Human Resources', 'จัดการบุคลากรและสวัสดิการ'),
+('FIN', 'แผนกการเงิน', 'Finance', 'จัดการด้านการเงินและบัญชี'),
+('PUR', 'แผนกจัดซื้อ', 'Procurement', 'จัดซื้อจัดจ้างและพัสดุ'),
+('PROD', 'แผนกผลิต', 'Production', 'การผลิตและควบคุมคุณภาพ'),
+('SALE', 'แผนกขาย', 'Sales', 'การขายและการตลาด');
+
+-- เพิ่มผู้ใช้งานตัวอย่าง
+INSERT INTO users (user_code, username, email, password_hash, title_th, first_name_th, last_name_th, 
+                  department_id, position_th, role, approval_level, budget_limit) VALUES
+('USR001', 'admin', 'admin@company.com', '$2b$10$example_hash', 'นาย', 'ผู้ดูแลระบบ', 'ระบบ', 1, 'ผู้ดูแลระบบ', 'admin', 999, 999999999.99),
+('USR002', 'manager01', 'manager@company.com', '$2b$10$example_hash', 'นาย', 'สมชาย', 'ใจดี', 4, 'ผู้จัดการฝ่ายจัดซื้อ', 'manager', 3, 1000000.00),
+('USR003', 'buyer01', 'buyer@company.com', '$2b$10$example_hash', 'นางสาว', 'สมหญิง', 'ใจงาม', 4, 'เจ้าหน้าที่จัดซื้อ', 'buyer', 1, 100000.00),
+('USR004', 'requester01', 'user@company.com', '$2b$10$example_hash', 'นาย', 'สมศักดิ์', 'มีเงิน', 1, 'เจ้าหน้าที่ IT', 'requester', 0, 0.00);
+
+-- เพิ่มหมวดหมู่สินค้าตัวอย่าง
+INSERT INTO product_categories (category_code, category_name_th, category_name_en, description_th) VALUES
+('COMP', 'คอมพิวเตอร์', 'Computer', 'อุปกรณ์คอมพิวเตอร์และอุปกรณ์ต่อพ่วง'),
+('SOFT', 'ซอฟต์แวร์', 'Software', 'โปรแกรมและใบอนุญาตซอฟต์แวร์'),
+('OFF', 'เครื่องเขียน', 'Office Supplies', 'อุปกรณ์เครื่องเขียนและสำนักงาน'),
+('FURN', 'เฟอร์นิเจอร์', 'Furniture', 'เฟอร์นิเจอร์และอุปกรณ์ตกแต่ง'),
+('SVC', 'บริการ', 'Services', 'การให้บริการต่างๆ'),
+('MAINT', 'บำรุงรักษา', 'Maintenance', 'บริการบำรุงรักษาและซ่อมแซม');
+
+-- เพิ่มสินค้าตัวอย่าง
+INSERT INTO products (product_code, product_name_th, product_name_en, description_th, category_id, 
+                     unit_th, unit_en, standard_price, created_by) VALUES
+('COMP001', 'เครื่องคอมพิวเตอร์ Desktop', 'Desktop Computer', 'เครื่องคอมพิวเตอร์สำหรับงานสำนักงาน', 1, 'เครื่อง', 'Unit', 25000.00, 1),
+('COMP002', 'เครื่องพิมพ์เลเซอร์', 'Laser Printer', 'เครื่องพิมพ์เลเซอร์ขาวดำ', 1, 'เครื่อง', 'Unit', 8000.00, 1),
+('SOFT001', 'Microsoft Office License', 'Microsoft Office License', 'ใบอนุญาตใช้งาน Microsoft Office', 2, 'ใบอนุญาต', 'License', 3500.00, 1),
+('OFF001', 'กระดาษ A4', 'A4 Paper', 'กระดาษ A4 80 แกรม', 3, 'รีม', 'Ream', 120.00, 1),
+('OFF002', 'ปากกาลูกลื่น', 'Ball Pen', 'ปากกาลูกลื่นสีน้ำเงิน', 3, 'ด้าม', 'Piece', 15.00, 1);
+
+-- เพิ่ม Workflow การอนุมัติตัวอย่าง
+INSERT INTO approval_workflows (workflow_name, document_type, amount_min, amount_max, is_active) VALUES
+('การอนุมัติใบขอซื้อ < 50,000 บาท', 'purchase_request', 0.00, 49999.99, TRUE),
+('การอนุมัติใบขอซื้อ 50,000 - 500,000 บาท', 'purchase_request', 50000.00, 499999.99, TRUE),
+('การอนุมัติใบขอซื้อ > 500,000 บาท', 'purchase_request', 500000.00, 999999999.99, TRUE);
+
+-- เพิ่มขั้นตอนการอนุมัติ
+INSERT INTO approval_steps (workflow_id, step_level, step_name, approver_type, approver_role, is_required) VALUES
+-- สำหรับยอดเงิน < 50,000 บาท
+(1, 1, 'อนุมัติโดยหัวหน้าแผนก', 'department_head', NULL, TRUE),
+(1, 2, 'อนุมัติโดยฝ่ายจัดซื้อ', 'role', 'buyer', TRUE),
+
+-- สำหรับยอดเงิน 50,000 - 500,000 บาท
+(2, 1, 'อนุมัติโดยหัวหน้าแผนก', 'department_head', NULL, TRUE),
+(2, 2, 'อนุมัติโดยผู้จัดการฝ่ายจัดซื้อ', 'role', 'manager', TRUE),
+(2, 3, 'อนุมัติโดยผู้อำนวยการ', 'role', 'admin', TRUE),
+
+-- สำหรับยอดเงิน > 500,000 บาท
+(3, 1, 'อนุมัติโดยหัวหน้าแผนก', 'department_head', NULL, TRUE),
+(3, 2, 'อนุมัติโดยผู้จัดการฝ่ายจัดซื้อ', 'role', 'manager', TRUE),
+(3, 3, 'อนุมัติโดยผู้อำนวยการ', 'role', 'admin', TRUE),
+(3, 4, 'อนุมัติโดยกรรมการผู้จัดการ', 'role', 'admin', TRUE);
+
+-- เพิ่มใบขอซื้อตัวอย่าง
+INSERT INTO purchase_requests (pr_number, pr_type, requester_id, department_id, request_date, required_date,
+                              subject_th, purpose_th, estimated_total, status, created_by) VALUES
+('PR2024001', 'ซื้อ', 4, 1, '2024-06-01', '2024-06-15', 
+ 'ขอซื้อเครื่องคอมพิวเตอร์ใหม่', 'เพื่อทดแทนเครื่องเก่าที่ชำรุด', 25000.00, 'submitted', 4),
+ 
+('PR2024002', 'ซื้อ', 4, 1, '2024-06-02', '2024-06-20',
+ 'ขอซื้อเครื่องเขียนสำนักงาน', 'เพื่อใช้ในการปฏิบัติงานประจำ', 5000.00, 'draft', 4);
+
+-- เพิ่มรายการสินค้าในใบขอซื้อ
+INSERT INTO purchase_request_items (pr_id, item_no, product_id, product_description_th, quantity, unit_th,
+                                   estimated_unit_price, estimated_total_price, required_date) VALUES
+(1, 1, 1, 'เครื่องคอมพิวเตอร์ Desktop Core i5, RAM 8GB, SSD 256GB', 1.00, 'เครื่อง', 25000.00, 25000.00, '2024-06-15'),
+(2, 1, 4, 'กระดาษ A4 80 แกรม สีขาว', 20.00, 'รีม', 120.00, 2400.00, '2024-06-20'),
+(2, 2, 5, 'ปากกาลูกลื่นสีน้ำเงิน', 100.00, 'ด้าม', 15.00, 1500.00, '2024-06-20');
